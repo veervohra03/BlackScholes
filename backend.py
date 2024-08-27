@@ -52,38 +52,8 @@ class BlackScholes:
         self.p_rho = (-1/100) * K * t * np.exp(-r * t) * scipy.stats.norm.cdf(-d2)
         
         return self.C, self.P, self.c_delta, self.p_delta, self.gamma, self.vega, self.c_theta, self.p_theta, self.c_rho, self.p_rho
-    
-'''
 
-def options_chain(symbol):
-    tk = yf.Ticker(symbol)
-    exps = tk.options
-    options = pd.DataFrame()
-    for e in exps:
-        opt = tk.option_chain(e)
-        opt = pd.DataFrame().append(opt.calls).append(opt.puts)
-        opt['expirationDate'] = e
-        options = options.append(opt, ignore_index=True)
-
-    # Bizarre error in yfinance that gives the wrong expiration date ; Add 1 day to get the correct expiration date
-    options['expirationDate'] = pd.to_datetime(options['expirationDate']) + datetime.timedelta(days = 1)
-    options['DtE'] = (options['expirationDate'] - datetime.datetime.today()).dt.days
-    
-
-    options['CALL?'] = options['contractSymbol'].str[4:].apply(lambda x: "C" in x)
-    
-    options[['bid', 'ask', 'strike']] = options[['bid', 'ask', 'strike']].apply(pd.to_numeric)
-    options['theo'] = (options['bid'] + options['ask']) / 2
-    
-    # Drop unnecessary columns & REARRANGE
-    options = options.drop(columns = ['contractSymbol', 'openInterest', 'contractSize', 'currency', 'change', 'percentChange', 'expirationDate', 'lastTradeDate', 'lastPrice'])
-    options = options[['strike', 'bid', 'theo', 'ask', 'volume', 'impliedVolatility', 'DtE', 'inTheMoney', 'CALL?']]
-    
-    return options
-
-'''
-
-def options_chain(symbol, r=0.04, q=0):
+def ticker_table(symbol, r, q):
     tk = yf.Ticker(symbol)
     exps = tk.options
     options = pd.DataFrame()
@@ -102,14 +72,9 @@ def options_chain(symbol, r=0.04, q=0):
     options[['bid', 'ask', 'strike']] = options[['bid', 'ask', 'strike']].apply(pd.to_numeric)
     options['theo'] = (options['bid'] + options['ask']) / 2
     
-    # Drop unnecessary columns & REARRANGE
+    # Drop unnecessary columns & add new columns
     options = options.drop(columns = ['contractSymbol', 'openInterest', 'contractSize', 'currency', 'change', 'percentChange', 'expirationDate', 'lastTradeDate', 'lastPrice'])
-    
-    options['delta'] = 0.00
-    options['gamma'] = 0.00
-    options['theta'] = 0.00
-    options['vega'] = 0.00
-    options['rho'] = 0.00
+    options['delta'], options['gamma'], options['theta'], options['vega'], options['rho'] = 0.00, 0.00, 0.00, 0.00, 0.00
     
     data = tk.history()
     S = data['Close'].iloc[-1]
@@ -118,24 +83,23 @@ def options_chain(symbol, r=0.04, q=0):
         K = options.at[i, 'strike']
         t = options.at[i, 't']
         v = options.at[i, 'impliedVolatility']
+
+        ticker_temp_bs_model = BlackScholes(S=S , K=K , r=r , t=t , vol=v , q=q)
+        _, _, c_delta, p_delta, gamma, vega, c_theta, p_theta, c_rho, p_rho = ticker_temp_bs_model.run()
+
+        options.at[i, 'vega'] = vega
+        options.at[i, 'gamma'] = gamma
+
         if options.at[i, 'CALL?'] == True:
-            d1 = (np.log(S / K) + ((r - q) + v * v / 2) * t) / (v * np.sqrt(t))
-            d2 = d1 - v * np.sqrt(t)
-            options.at[i, 'delta'] = round(scipy.stats.norm.cdf(d1), 4)
-            options.at[i, 'gamma'] = round(scipy.stats.norm.pdf(d1) / (S * v * np.sqrt(t)), 4)
-            options.at[i, 'theta'] = round((-(S * v * scipy.stats.norm.pdf(d1)) / (2 * np.sqrt(t)) -r * K * np.exp(-r * t) * scipy.stats.norm.cdf(d2)) / 365, 4)
-            options.at[i, 'vega'] = round(S * np.sqrt(t) * scipy.stats.norm.pdf(d1) / 100, 4)
-            options.at[i, 'rho'] = round(K * t * np.exp(-r * t) * scipy.stats.norm.cdf(d2) / 100, 4)
+            options.at[i, 'delta'] = c_delta
+            options.at[i, 'theta'] = c_theta
+            options.at[i, 'rho'] = c_rho
         else:
-            d1 = (np.log(S / K) + r * t) / (v * np.sqrt(t)) + 0.5 * v * np.sqrt(t)
-            d2 = d1 - (v * np.sqrt(t))
-            options.at[i, 'delta'] = round(-scipy.stats.norm.cdf(-d1), 4)
-            options.at[i, 'gamma'] = round(scipy.stats.norm.pdf(d1) / (S * v * np.sqrt(t)), 4)
-            options.at[i, 'theta'] = round((-(S * v * scipy.stats.norm.pdf(d1)) / (2 * np.sqrt(t)) + r * K * np.exp(-r * t) * scipy.stats.norm.cdf(-d2)) / 365, 4)
-            options.at[i, 'vega'] = round(S * np.sqrt(t) * scipy.stats.norm.pdf(d1) / 100, 4)
-            options.at[i, 'rho'] = round(-K * t * np.exp(-r * t) * scipy.stats.norm.cdf(-d2) / 100, 4)
+            options.at[i, 'delta'] = p_delta
+            options.at[i, 'theta'] = p_theta
+            options.at[i, 'rho'] = p_rho
     
-    options = options[['strike', 'bid', 'theo', 'ask', 'volume', 'impliedVolatility', 't', 'CALL?', 'delta', 'gamma', 'theta', 'vega', 'rho', 'inTheMoney']]
+    options = options[['CALL?', 'volume', 't', 'bid', 'theo', 'ask', 'strike','impliedVolatility', 'delta', 'gamma', 'theta', 'vega', 'rho', 'inTheMoney']]
 
     return options, S
 
