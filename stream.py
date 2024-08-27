@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from backend import BlackScholes, BionomialLattice, options_chain
+from backend import BlackScholes, BionomialLattice, ticker_table
 
 # PAGE CONFIG
 st.set_page_config(
@@ -24,8 +24,8 @@ with st.sidebar:
     volatility = st.number_input("Volatility (σ)", value=0.2000)
     interest_rate = st.number_input("Risk-Free Interest Rate (r)", value=0.0500)
     div_yield = st.number_input("Dividend Yield (q)", value=0.0000)
+    #numsteps = st.number_input("Number of Steps (Binomial Lattice)", value=5)
     symb = st.text_input("Ticker", value='AAPL')
-    # numsteps = st.number_input("Number of Steps (Binomial Lattice)", value=5)
 
 # MAIN PAGE
 st.title("Black-Scholes Options Pricing")
@@ -70,10 +70,16 @@ st.dataframe(
 )
 
 st.markdown("---")
-st.info("Compare this real-time option data to the Black-Scholes estimates")
+st.info("Compare these real option contracts to the Black-Scholes model above.")
 
-df, spot = options_chain(symb, interest_rate, div_yield)
-st.metric("Spot Price", round(spot, 3))
+df, spot = ticker_table(symb, interest_rate, div_yield)
+
+col1, col2, col3, col4 = st.columns(4)
+with col1:
+    st.metric("Ticker", symb)
+with col2:
+    st.metric("Spot Price", round(spot, 3))
+
 st.dataframe(
     df,
     hide_index=True,
