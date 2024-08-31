@@ -1,114 +1,42 @@
-import numpy as np
-import scipy
-import pandas as pd
 import yfinance as yf
-import datetime
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from scipy.stats import norm
 
 class BlackScholes:
-    def __init__(self, S: float, K: float, r: float, t: float, vol: float, q: float):
-        self.S = S
-        self.K = K
-        self.r = r
-        self.t = t
-        self.vol = vol
-        self.q = q
+    def __init__(self, S, K, r, t, vol, q):
+        self.S = np.array(S)
+        self.K = np.array(K)
+        self.r = np.array(r)
+        self.t = np.array(t) / 365
+        self.vol = np.array(vol)
+        self.q = np.array(q)
 
     def run(self):
-        S = self.S 
-        K = self.K
-        r = self.r
-        t = self.t / 365
-        vol = self.vol
-        q = self.q
-        
-        d1 = (np.log(S / K) + ((r - q + ((vol**2) / 2)) * t)) / (vol * np.sqrt(t))
-        d2 = (np.log(S / K) + ((r - q - ((vol**2) / 2)) * t)) / (vol * np.sqrt(t))
-    
-        Nd1 = scipy.stats.norm.cdf(d1)
-        Nd2 = scipy.stats.norm.cdf(d2)
-        
-        self.C = (S * np.exp(-q * t) * Nd1) - (K * np.exp(-r * t) * Nd2)
-        self.P = (K * np.exp(-r * t)) + self.C - (np.exp(-q * t) * S)
-        
-        # Put-Call Parity
-        # (np.exp(−r * T) * K) + self.C = (np.exp(−q * T) * S) + self.P
+        d1 = (np.log(self.S / self.K) + (self.r - self.q + 0.5 * self.vol ** 2) * self.t) / (self.vol * np.sqrt(self.t))
+        d2 = d1 - self.vol * np.sqrt(self.t)
 
-        # GREEKS
+        call_price = (self.S * np.exp(-self.q * self.t) * norm.cdf(d1)) - (self.K * np.exp(-self.r * self.t) * norm.cdf(d2))
+        put_price = (self.K * np.exp(-self.r * self.t) * norm.cdf(-d2)) - (self.S * np.exp(-self.q * self.t) * norm.cdf(-d1))
+        call_delta = norm.cdf(d1) * np.exp(-self.q * self.t)
+        put_delta = -norm.cdf(-d1) * np.exp(-self.q * self.t)
+        gamma = norm.pdf(d1) / (self.S * self.vol * np.sqrt(self.t))
+        vega = self.S * np.exp(-self.q * self.t) * norm.pdf(d1) * np.sqrt(self.t)
+        call_theta = (-self.S * norm.pdf(d1) * self.vol / (2 * np.sqrt(self.t)) - self.r * self.K * np.exp(-self.r * self.t) * norm.cdf(d2)) / 365
+        put_theta = (-self.S * norm.pdf(d1) * self.vol / (2 * np.sqrt(self.t)) + self.r * self.K * np.exp(-self.r * self.t) * norm.cdf(-d2)) / 365
+        call_rho = self.K * self.t * np.exp(-self.r * self.t) * norm.cdf(d2)
+        put_rho = -self.K * self.t * np.exp(-self.r * self.t) * norm.cdf(-d2)
 
-        self.c_theta = (-((S * vol * np.exp(-q * t)) / (2*np.sqrt(t)) * (1 / (np.sqrt(2 * np.pi))) * np.exp(-(d1 * d1) / 2))-(r * K * np.exp(-r * t) * Nd2) + (q * np.exp(-q * t) * S * Nd1)) / 365
-        self.p_theta = (-((S * vol * np.exp(-q * t)) / (2*np.sqrt(t)) * (1 / (np.sqrt(2 * np.pi))) * np.exp(-(d1 * d1) / 2))+(r * K * np.exp(-r * t) * scipy.stats.norm.cdf(-d2)) - (q * np.exp(-q * t) * S * scipy.stats.norm.cdf(-d1))) / 365
-        
-        self.c_premium = np.exp(-q * t) * S * Nd1 - K * np.exp(-r * t) * scipy.stats.norm.cdf(d1 - vol * np.sqrt(t))
-        self.p_premium = K * np.exp(-r * t) * scipy.stats.norm.cdf(-d2) - np.exp(-q * t) * S * scipy.stats.norm.cdf(-d1)
-        
-        self.c_delta = np.exp(-q * t) * Nd1
-        self.p_delta = np.exp(-q * t) * (Nd1-1)
-        
-        self.gamma = (np.exp(-r*t)/(S*vol*np.sqrt(t)))*(1/(np.sqrt(2*np.pi)))*np.exp(-(d1*d1)/2)
-        
-        self.vega = ((1/100) * S * np.exp(-r * t)*np.sqrt(t))*(1/(np.sqrt(2*np.pi))*np.exp(-(d1*d1)/2))
-        
-        self.c_rho = (1/100) * K * t * np.exp(-r * t) * Nd2
-        self.p_rho = (-1/100) * K * t * np.exp(-r * t) * scipy.stats.norm.cdf(-d2)
-        
-        return self.C, self.P, self.c_delta, self.p_delta, self.gamma, self.vega, self.c_theta, self.p_theta, self.c_rho, self.p_rho
-
-def ticker_table(symbol, r, q):
-    tk = yf.Ticker(symbol)
-    exps = tk.options
-    options = pd.DataFrame()
-    for e in exps:
-        opt = tk.option_chain(e)
-        opt = pd.concat([pd.DataFrame(opt.calls), pd.DataFrame(opt.puts)])
-        opt['expirationDate'] = e
-        options = pd.concat([options, opt], ignore_index=True)
-
-    # add 1 day to adjust for error in yfinance that gives wrong expiration date
-    options['expirationDate'] = pd.to_datetime(options['expirationDate']) + datetime.timedelta(days = 1)
-    options['t'] = (options['expirationDate'] - datetime.datetime.today()).dt.days
-
-    options['CALL?'] = options['contractSymbol'].str[4:].apply(lambda x: 'C' in x)
-    
-    options[['bid', 'ask', 'strike']] = options[['bid', 'ask', 'strike']].apply(pd.to_numeric)
-    options['theo'] = (options['bid'] + options['ask']) / 2
-    
-    # Drop unnecessary columns & add new columns
-    options = options.drop(columns = ['contractSymbol', 'openInterest', 'contractSize', 'currency', 'change', 'percentChange', 'expirationDate', 'lastTradeDate', 'lastPrice'])
-    options['delta'], options['gamma'], options['theta'], options['vega'], options['rho'] = 0.00, 0.00, 0.00, 0.00, 0.00
-    
-    data = tk.history()
-    S = data['Close'].iloc[-1]
-    
-    for i in options.index:
-        K = options.at[i, 'strike']
-        t = options.at[i, 't']
-        v = options.at[i, 'impliedVolatility']
-
-        ticker_temp_bs_model = BlackScholes(S=S , K=K , r=r , t=t , vol=v , q=q)
-        _, _, c_delta, p_delta, gamma, vega, c_theta, p_theta, c_rho, p_rho = ticker_temp_bs_model.run()
-
-        options.at[i, 'vega'] = vega
-        options.at[i, 'gamma'] = gamma
-
-        if options.at[i, 'CALL?'] == True:
-            options.at[i, 'delta'] = c_delta
-            options.at[i, 'theta'] = c_theta
-            options.at[i, 'rho'] = c_rho
-        else:
-            options.at[i, 'delta'] = p_delta
-            options.at[i, 'theta'] = p_theta
-            options.at[i, 'rho'] = p_rho
-    
-    options = options[['CALL?', 'volume', 't', 'bid', 'theo', 'ask', 'strike','impliedVolatility', 'delta', 'gamma', 'theta', 'vega', 'rho', 'inTheMoney']]
-
-    return options, S
+        return call_price, put_price, call_delta, put_delta, gamma, vega, call_theta, put_theta, call_rho, put_rho
 
 class BionomialLattice:
     def __init__(self, S: float, K: float, r: float, t: float, vol: float, steps: float):
         self.S = S
         self.K = K
         self.r = r
-        self.t = t
+        self.t = t / 365
         self.vol = vol
         self.steps = steps
 
@@ -135,7 +63,6 @@ class BionomialLattice:
             V[:-1] = np.exp(-r * dT) * (p * V[1:] + q * V[:-1]) 
 
         return V[0]
-
 
     def binomial_put(self, S, K, r, t, vol, steps): 
         # Delta t, up and down factors
@@ -165,3 +92,65 @@ class BionomialLattice:
         self.C = self.binomial_call(self.S, self.K, self.r, self.t, self.vol, self.steps)
         self.P = self.binomial_put(self.S, self.K, self.r, self.t, self.vol, self.steps)
         return self.C, self.P
+
+def ticker(symbol, r, q):
+    tk = yf.Ticker(symbol)
+    exps = tk.options
+    options = pd.DataFrame()
+    
+    for e in exps:
+        opt = tk.option_chain(e)
+        opt = pd.concat([pd.DataFrame(opt.calls), pd.DataFrame(opt.puts)])
+        opt['expirationDate'] = e
+        options = pd.concat([options, opt], ignore_index=True)
+
+    options['expirationDate'] = pd.to_datetime(options['expirationDate']) + pd.DateOffset(days=1)
+    options['t'] = (options['expirationDate'] - pd.Timestamp.today()).dt.days
+
+    options['CALL?'] = options['contractSymbol'].str[4:].apply(lambda x: 'C' in x)
+    options[['bid', 'ask', 'strike']] = options[['bid', 'ask', 'strike']].apply(pd.to_numeric)
+    options['theo'] = (options['bid'] + options['ask']) / 2
+
+    options = options.drop(columns=['contractSymbol', 'openInterest', 'contractSize', 'currency', 'change', 'percentChange', 'expirationDate', 'lastTradeDate', 'lastPrice'])
+    options['delta'], options['gamma'], options['theta'], options['vega'], options['rho'] = 0.00, 0.00, 0.00, 0.00, 0.00
+
+    data = tk.history()
+    S = data['Close'].iloc[-1]
+
+    bs_model = BlackScholes(S=S,
+                            K=options['strike'],
+                            r=r,
+                            t=options['t'],
+                            vol=options['impliedVolatility'],
+                            q=q)
+    
+    _, __, call_delta, put_delta, gamma, vega, call_theta, put_theta, call_rho, put_rho = bs_model.run()
+
+    options['delta'] = np.where(options['CALL?'], call_delta, put_delta)
+    options['theta'] = np.where(options['CALL?'], call_theta, put_theta)
+    options['rho'] = np.where(options['CALL?'], call_rho, put_rho)
+    options['gamma'] = gamma
+    options['vega'] = vega
+
+    options = options[['CALL?', 'volume', 't', 'bid', 'theo', 'ask', 'strike', 'impliedVolatility', 'delta', 'gamma', 'theta', 'vega', 'rho', 'inTheMoney']]
+
+    # PLOT
+    fig, (ax1, ax2) = plt.subplots(1, 2)
+    fig.set_figheight(5)
+    fig.set_figwidth(15)
+    fig.suptitle('Volatility Smiles')
+    unique_expirations = options['t'].unique()
+    calls = options[options['CALL?'] == True]
+    puts = options[options['CALL?'] == False]
+    for t in unique_expirations:
+        exp_calls = calls[calls['t'] == t]
+        exp_puts = puts[puts['t'] == t]
+        sns.lineplot(ax=ax1, data=exp_calls, x='strike', y='impliedVolatility', label=f'{int(t)}')
+        sns.lineplot(ax=ax2, data=exp_puts, x='strike', y='impliedVolatility', label=f'{int(t)}')
+    ax1.set_title("Calls")
+    ax1.set(xlabel='Strike', ylabel='Implied Volatility')
+    ax2.set_title("Puts")
+    ax2.set(xlabel='Strike', ylabel='Implied Volatility')
+    ax2.get_legend().remove()
+
+    return options, S, fig
